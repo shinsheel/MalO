@@ -1,0 +1,34 @@
+; MalO - Hy-like base
+print (+ 10 20)
+print (if True "yes" "no")
+defn greet [x] (print "Hello," x)
+greet "MalO"
+setv i 0
+while (< i 10)
+	print (+ i 10)
+	setv i (+ i 1)
+
+for [i (range 0 10)]
+	print "for: " i	
+
+
+; swap: (swap a b) exchanges the values of two variables (uses _swap_tmp in same env)
+(defmacro swap [x y] (do (setv _swap_tmp x) (setv x y) (setv y _swap_tmp)))
+
+setv a 1
+setv b 2
+(print a b)
+(swap a b)
+(print a b)
+
+; Demo: quote (literal), unquote (eval one), unquote-splice (eval list and splice)
+; (with-brackets val lst) -> (list "open" <val> ...lst... "close")
+(defmacro with-brackets [val lst]
+  (quasiquote (list (quote open) (unquote val) (unquote-splice lst) (quote close))))
+
+(print (quote (a b c)))
+(print (with-brackets (+ 1 2) (list 10 20)))
+(print [list "a" "b"])
+; question: how to organize [] brackets and synthactic sugar around list
+; question: to use lisp or hy sugar for quasiquote
+; possible concept: clutter free
