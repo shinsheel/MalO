@@ -1,0 +1,202 @@
+; --- literals, builtins, arithmetic ---
+print (+ 10 20)
+print (- 10 3)
+print (- 3)
+print (* 2 2)
+print (/ 10 2)
+print (< 1 2)
+print (<= 1 1)
+print (> 2 1)
+print (>= 2 2)
+print 1.5
+print -2
+print 1.5e-1
+print True
+print False
+print None
+print "line\nnext\ttab"
+print "say \"hi\""
+print (len (list 1 2 3))
+print (first (list 1 2 3))
+print (rest (list 1 2 3))
+print (range 3)
+
+; --- if / assert ---
+print (if True "Yes" "No")
+print (if False "Yes" "No")
+print (if True "only-then")
+print (if False "only-then")
+assert (= (* 2 2) 4)
+assert True "ok"
+
+; --- bindings: setv, def, let, do ---
+setv x 100
+def y 7
+print x y
+let [a 1 b (+ a 2)]
+	print a b
+do
+	print "seq-a"
+	print "seq-b"
+
+; --- functions: defn, fn, params, keywords ---
+defn greet [name &optional [suffix "!"]]
+	print "Hello," name suffix
+greet "MalO"
+greet :name "MalO"
+greet "MalO" :suffix "?"
+greet :suffix "~" :name "MalO"
+
+defn maybe [x &optional y]
+	print x y
+maybe 1
+maybe 1 2
+
+defn chant [&rest]
+	for [word args]
+		print word
+chant "scp-671" "scp-1471"
+
+defn declamate [&keys]
+	for [[k v] (.items keys)]
+		print k v
+declamate :woo "WOO" :hoo "HOO"
+
+defn gather [x &rest extras &keys opts]
+	print x extras opts
+gather 1 2 3 :a 4
+
+defn flex [a &optional [b 1] extra &rest xs &keys ks]
+	print a b extra xs ks
+flex 10
+flex 10 20 30 40
+flex 10 :b 2 :extra 3 :z 9
+
+defn add1 [x]
+	do (setv y (+ x 1)) y
+print (add1 41)
+
+setv twice
+	fn [x]
+		* x 2
+print (twice 21)
+setv twice-do
+	fn [x]
+		do (setv y (* x 2)) y
+print (twice-do 3)
+
+setv add-n
+	let [n 10]
+		fn [x]
+			+ x n
+print (add-n 5)
+let [n 3]
+	defn mul-n [x]
+		* x n
+	print (mul-n 4)
+
+; --- update ---
+update x + 100
+print x
+defn double [x]
+	* x 2
+update x double
+print x
+
+; --- loops: while, for, break, continue ---
+setv i 0
+while (< i 3)
+	print i
+	update i + 1
+
+setv i 0
+while True
+	if (>= i 3)
+		break
+	update i + 1
+print i
+
+for [n (range 4)]
+	if (= n 1)
+		continue
+	print n
+
+for [i (range 2)]
+	setv j 0
+	while (< j 2)
+		print i j
+		update j + 1
+
+setv nested (list (list (list 1 2) 3))
+for [[[a b] c] nested]
+	print a b c
+
+; --- dicts ---
+setv _dict {"a" "A" "b" "B"}
+for [[k v] (.items _dict)]
+	print k v
+print {None "nil" 2 "two"}
+print {"outer" {"inner" 1}}
+print {(+ 1 2) "three"}
+
+; --- python interop ---
+import math
+import math :as mt os.path
+from math :import sin cos
+from math :import sqrt :as square_root
+from math :import *
+from builtins :import str type
+from os.path :import join
+
+print (math.sqrt 2)
+print (mt.sqrt 9)
+print (sin 0)
+print (cos 0)
+print (square_root 4)
+print (os.path.join "a" "b")
+print (join "a" "b")
+print (. math pi)
+print (. "hello" (upper))
+print (. "ab" (replace "a" "z"))
+print (.format "Hello, {}!" "SCP Foundation")
+print (.format "Hello, {who}!" :who "MalO")
+print (. "Hello, {who}!" (format :who "MalO"))
+print ((. "Hello, {}!" format) "MalO")
+
+; --- macros, quote, quasiquote ---
+defmacro setv-str [var val]
+	setv var (str val)
+setv-str s10 10
+print (type s10)
+setv-str :var s11 :val 11
+print (type s11)
+
+defmacro show2 [x]
+	print x x
+defmacro show2! [x]
+	show2 x
+show2! "echo"
+
+defmacro tag-print [x &optional [label "val"]]
+	print label x
+tag-print 1
+tag-print 1 :label "num"
+
+defmacro quoted-args [&rest xs]
+	quote xs
+print (quoted-args 1 2 3)
+
+defmacro dump-keys [&keys opts] opts
+print (dump-keys :a 1 :b 2)
+
+setv who "MalO"
+setv tags (list "scp-671" "scp-1471")
+print `(hello ~who score ~(+ 10 20) ~@tags)
+print (quote (a b c))
+print (quote {a 1})
+print (quasiquote (hello (unquote who) (unquote-splice tags)))
+print `(literal (quote (+ 1 2)) computed ~(+ 1 2))
+print `{who ~who n ~(+ 1 2)}
+print `{label ~who ~@tags}
+
+print `(starts-with-indent ~who)
