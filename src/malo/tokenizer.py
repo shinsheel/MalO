@@ -11,26 +11,41 @@ class Token:
     col: int
 
 
-def _count_leading_tabs(line: str) -> int:
-    """Return number of leading tab characters."""
-    count = 0
-    for c in line:
-        if c == "\t":
-            count += 1
+_SPACES_PER_INDENT = 4
+
+
+def _split_indent(line: str) -> tuple[int, str]:
+    """Return (indent_level, rest_of_line).
+
+    One tab or four spaces is one indent level. Tabs advance to the next
+    multiple of four columns, so mixed leading whitespace still lines up.
+    Leftover spaces (1–3) are not an indent level and stay in the rest.
+    """
+    col = 0
+    i = 0
+    n = len(line)
+    while i < n and line[i] in " \t":
+        if line[i] == "\t":
+            col = (col // _SPACES_PER_INDENT + 1) * _SPACES_PER_INDENT
         else:
-            break
-    return count
+            col += 1
+        i += 1
+    remainder = col % _SPACES_PER_INDENT
+    if remainder:
+        i -= remainder
+        col -= remainder
+    return col // _SPACES_PER_INDENT, line[i:]
 
 
 def tokenize_with_indent(source: str) -> Iterator[Token]:
     """
-    Tokenize with virtual brackets from tab indentation.
+    Tokenize with virtual brackets from indentation.
     Block structure is indentation, not wrapping parentheses:
     - Each line with text implies "(" at the start (unless the line already starts with
       "(" or a reader-macro prefix ` ~ ~@).
-    - When indent drops (fewer tabs on next line), emit ")" for each dropped level.
+    - When indent drops (fewer levels on next line), emit ")" for each dropped level.
     - When indent stays the same and previous line had content, emit ")" to close that line's list.
-    Only tab characters count as indent; spaces do not.
+    One tab or four spaces is one indent level.
     """
     lines = source.split("\n")
     current_indent = 0
@@ -38,8 +53,7 @@ def tokenize_with_indent(source: str) -> Iterator[Token]:
     prev_had_virtual_open = False
 
     for line_no, line in enumerate(lines, 1):
-        tab_count = _count_leading_tabs(line)
-        content = line[tab_count:]
+        indent, content = _split_indent(line)
         line_tokens = list(tokenize(content)) if content.strip() else []
 
         # Ignore blank/comment-only lines for virtual bracket transitions.
@@ -47,18 +61,18 @@ def tokenize_with_indent(source: str) -> Iterator[Token]:
             continue
 
         # Emit ")" for dropped indent levels
-        if tab_count < current_indent:
+        if indent < current_indent:
             # Close the previous line's form before leaving its indent level
             if prev_had_virtual_open:
                 virtual_open_count -= 1
                 yield Token("rparen", ")", line_no, 1)
                 prev_had_virtual_open = False
-            for _ in range(current_indent - tab_count):
+            for _ in range(current_indent - indent):
                 virtual_open_count -= 1
                 yield Token("rparen", ")", line_no, 1)
 
         # Same indent and previous line opened a list: close it
-        if tab_count == current_indent and prev_had_virtual_open:
+        if indent == current_indent and prev_had_virtual_open:
             virtual_open_count -= 1
             yield Token("rparen", ")", line_no, 1)
 
@@ -73,13 +87,13 @@ def tokenize_with_indent(source: str) -> Iterator[Token]:
             "unquote_splice",
         ):
             virtual_open_count += 1
-            yield Token("lparen", "(", line_no, tab_count + 1)
+            yield Token("lparen", "(", line_no, indent + 1)
             prev_had_virtual_open = True
         else:
             prev_had_virtual_open = False
         for t in line_tokens:
             yield Token(t.kind, t.value, line_no, t.col)
-        current_indent = tab_count
+        current_indent = indent
 
     # Close any remaining virtual opens at EOF
     for _ in range(virtual_open_count):

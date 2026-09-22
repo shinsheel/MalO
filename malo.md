@@ -6,9 +6,9 @@ contributors:
 ---
 
 MalO is a small [Hy](https://hylang.org/)-like Lisp on Python 3.13+.
-Each non-empty line is a form. Tab indentation opens a body (spaces do not
-count). Parentheses, brackets, and braces nest arguments on the same line —
-do not wrap a block in parentheses.
+Each non-empty line is a form. Indentation opens a body: one tab or four
+spaces per level. Parentheses, brackets, and braces nest arguments on the
+same line — do not wrap a block in parentheses.
 
 Run a file with `uv run malo path/to/file.malo`.
 
@@ -20,7 +20,7 @@ Run a file with `uv run malo path/to/file.malo`.
 ; (function arg1 arg2). A whole line is already a form, so write:
 print "hello world"
 
-; Tabs indent a body under the previous form. Dedenting closes it.
+; Indent (tab or 4 spaces) opens a body under the previous form. Dedenting closes it.
 setv i 0
 while (< i 3)
 	print i
@@ -94,10 +94,33 @@ print {"outer" {"inner" 1}} ; => {'outer': {'inner': 1}}
 print {(+ 1 2) "three"} ; => {3: 'three'}
 
 ;; Functions
-; defn defines a named function; the last form is the return value
+; defn defines a named function; the last form is the return value.
+; return exits early (bare return yields None). Use it for a lone
+; literal or symbol on its own line, which would otherwise be a call.
 defn greet [name]
 	print "hello" name
 greet "bilbo" ; => hello bilbo
+
+defn abs [n]
+	if (< n 0)
+		return (- n)
+	return n
+print (abs -3) ; => 3
+print (abs 3) ; => 3
+
+defn additor [x]
+	if (= x 0)
+		return ""
+	(+ "1" (additor (- x 1)))
+print (additor 3) ; => 111
+
+; Tail recursion: the recursive call is the whole result, not nested in +.
+; Those calls reuse the stack frame, so deep recursion does not overflow.
+defn additor* [x &optional [acc ""]]
+	if (= x 0)
+		return acc
+		return (additor* (- x 1) (+ acc "1"))
+print (additor* 3) ; => 111
 
 ; &optional name, or &optional [name default]. Missing optionals are None
 defn foolists [arg1 &optional [arg2 2]]
@@ -172,6 +195,7 @@ for [[[a b] c] nested]
 	print a b c ; => 1 2 3
 
 ; break and continue work inside while / for
+; return works inside defn / fn (including from inside a loop)
 setv i 0
 while True
 	if (>= i 3)

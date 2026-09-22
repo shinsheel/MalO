@@ -24,6 +24,14 @@ class _ContinueSignal(Exception):
     pass
 
 
+class _ReturnSignal(Exception):
+    """Internal control-flow signal for return."""
+
+    def __init__(self, value: Any) -> None:
+        self.value = value
+        super().__init__()
+
+
 @dataclass
 class _ParamSpec:
     """Parsed parameter list: required, optional, &rest, and &keys collector."""
@@ -31,6 +39,40 @@ class _ParamSpec:
     optional: List[Tuple[str, Optional[MalOForm]]]  # default None => bind None
     rest: Optional[str] = None  # &rest name (bare &rest => "args")
     keys: Optional[str] = None  # &keys name (bare &keys => "keys")
+
+
+@dataclass(eq=False)
+class _TailCall:
+    """Pending MalO call in tail position; the trampoline reuses the frame."""
+    fn: "_MalOFn"
+    args: List[Any]
+    kwargs: Dict[str, Any]
+
+
+@dataclass(eq=False)
+class _MalOFn:
+    """User function (defn / fn). Tail calls bounce instead of growing the stack."""
+    label: str
+    param_spec: _ParamSpec
+    body: List[MalOForm]
+    env: Dict[str, Any]
+
+    def __repr__(self) -> str:
+        return f"<MalOFn {self.label}>"
+
+    def __call__(self, *args: Any, **kwargs: Any) -> Any:
+        fn: _MalOFn = self
+        while True:
+            inner = _bind_params(
+                fn.param_spec, list(args), fn.env, fn.label, kwargs=kwargs
+            )
+            result = _eval_fn_body(fn.body, inner)
+            if isinstance(result, _TailCall):
+                fn = result.fn
+                args = result.args
+                kwargs = result.kwargs
+                continue
+            return result
 
 
 def _get_macros(env: Dict[str, Any]) -> Dict[str, Any]:
@@ -399,7 +441,7 @@ def _bind_pattern(pat: MalOForm, value: Any, env: Dict[str, Any], context: str) 
     raise MalOError(f"{context}: invalid destructuring pattern")
 
 
-def eval_form(form: MalOForm, env: Dict[str, Any]) -> Any:
+def eval_form(form: MalOForm, env: Dict[str, Any], tail: bool = False) -> Any:
     """Evaluate a single form in the given environment."""
     if isinstance(form, Number):
         return form.value
@@ -416,18 +458,32 @@ def eval_form(form: MalOForm, env: Dict[str, Any]) -> Any:
             for i in range(0, len(elems), 2)
         }
     if isinstance(form, ListForm):
-        return eval_list(form, env)
+        return eval_list(form, env, tail=tail)
     raise MalOError(f"Cannot evaluate: {form}")
 
 
+def _eval_fn_body(body: List[MalOForm], env: Dict[str, Any]) -> Any:
+    """Evaluate a defn/fn body; return exits with its value."""
+    result = None
+    try:
+        last = len(body) - 1
+        for i, expr in enumerate(body):
+            result = eval_form(expr, env, tail=(i == last))
+    except _ReturnSignal as exc:
+        return exc.value
+    return result
+
+
 def eval_top_level(form: MalOForm, env: Dict[str, Any]) -> Any:
-    """Evaluate a top-level form and convert loop control misuse to MalOError."""
+    """Evaluate a top-level form and convert control-flow misuse to MalOError."""
     try:
         return eval_form(form, env)
     except _BreakSignal as exc:
         raise MalOError("break used outside of loop") from exc
     except _ContinueSignal as exc:
         raise MalOError("continue used outside of loop") from exc
+    except _ReturnSignal as exc:
+        raise MalOError("return used outside of function") from exc
 
 
 def _macroexpand(form: MalOForm, env: Dict[str, Any]) -> MalOForm:
@@ -444,11 +500,11 @@ def _macroexpand(form: MalOForm, env: Dict[str, Any]) -> MalOForm:
     return form
 
 
-def eval_list(form: ListForm, env: Dict[str, Any]) -> Any:
+def eval_list(form: ListForm, env: Dict[str, Any], tail: bool = False) -> Any:
     """Evaluate an s-expression (special form or function call)."""
     form = _macroexpand(form, env)
     if not isinstance(form, ListForm):
-        return eval_form(form, env)
+        return eval_form(form, env, tail=tail)
     elements = form.elements
     if not elements:
         raise MalOError("Empty list () cannot be evaluated")
@@ -594,6 +650,12 @@ def eval_list(form: ListForm, env: Dict[str, Any]) -> Any:
                 raise MalOError("(continue) does not accept arguments")
             raise _ContinueSignal()
 
+        if name == "return":
+            if len(elements) > 2:
+                raise MalOError("(return value?) takes at most one argument")
+            value = None if len(elements) == 1 else eval_form(elements[1], env, tail=True)
+            raise _ReturnSignal(value)
+
         if name == "let":
             if len(elements) < 2:
                 raise MalOError("(let [name value ...] body...) requires at least 2 elements")
@@ -610,8 +672,10 @@ def eval_list(form: ListForm, env: Dict[str, Any]) -> Any:
                     raise MalOError("(let bindings ...): binding name must be a symbol")
                 inner[sym.name] = eval_form(bindings[i + 1], inner)
             result = None
-            for expr in elements[2:]:
-                result = eval_form(expr, inner)
+            body = elements[2:]
+            last = len(body) - 1
+            for i, expr in enumerate(body):
+                result = eval_form(expr, inner, tail=tail and i == last)
             return result
 
         if name == "defn":
@@ -628,15 +692,7 @@ def eval_list(form: ListForm, env: Dict[str, Any]) -> Any:
             if not body:
                 raise MalOError("(defn name [params...] body...): body cannot be empty")
 
-            def fn(*args: Any, **kwargs: Any) -> Any:
-                inner = _bind_params(
-                    param_spec, list(args), env, fn_name.name, kwargs=kwargs
-                )
-                result = None
-                for expr in body:
-                    result = eval_form(expr, inner)
-                return result
-
+            fn = _MalOFn(fn_name.name, param_spec, body, env)
             env[fn_name.name] = fn
             return fn
 
@@ -648,26 +704,16 @@ def eval_list(form: ListForm, env: Dict[str, Any]) -> Any:
                 raise MalOError("(fn [params...] body...): params must be a list")
             param_spec = _parse_params(params_form, "(fn ...)")
             body = elements[2:]
-
-            def fn(*args: Any, **kwargs: Any) -> Any:
-                inner = _bind_params(
-                    param_spec, list(args), env, "Anonymous fn", kwargs=kwargs
-                )
-                result = None
-                for expr in body:
-                    result = eval_form(expr, inner)
-                return result
-
-            return fn
+            return _MalOFn("Anonymous fn", param_spec, body, env)
 
         if name == "if":
             if len(elements) not in (3, 4):
                 raise MalOError("(if test then else?) requires 3 or 4 elements")
             test = eval_form(elements[1], env)
             if test:
-                return eval_form(elements[2], env)
+                return eval_form(elements[2], env, tail=tail)
             if len(elements) == 4:
-                return eval_form(elements[3], env)
+                return eval_form(elements[3], env, tail=tail)
             return None
 
         if name == "assert":
@@ -681,8 +727,10 @@ def eval_list(form: ListForm, env: Dict[str, Any]) -> Any:
 
         if name == "do":
             result = None
-            for expr in elements[1:]:
-                result = eval_form(expr, env)
+            body = elements[1:]
+            last = len(body) - 1
+            for i, expr in enumerate(body):
+                result = eval_form(expr, env, tail=tail and i == last)
             return result
 
         if name == "quote":
@@ -726,6 +774,8 @@ def eval_list(form: ListForm, env: Dict[str, Any]) -> Any:
     pos_forms, kw_forms = _split_call_args(elements[1:])
     args = [eval_form(e, env) for e in pos_forms]
     kwargs = {k: eval_form(v, env) for k, v in kw_forms.items()}
+    if tail and isinstance(fn, _MalOFn):
+        return _TailCall(fn, args, kwargs)
     return fn(*args, **kwargs)
 
 

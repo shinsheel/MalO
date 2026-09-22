@@ -1,6 +1,6 @@
 # MalO
 
-A small [Hy](https://hylang.org/)-like Lisp interpreter that runs on Python 3.13+. Programs are tab-indented forms with nested parentheses for arguments, plus Python interop, macros, and keyword arguments.
+A small [Hy](https://hylang.org/)-like Lisp interpreter that runs on Python 3.13+. Programs are indented forms with nested parentheses for arguments, plus Python interop, macros, and keyword arguments.
 
 ## Requirements
 
@@ -26,7 +26,7 @@ uv run malo examples/main.malo
 
 Each non-empty line is a form (a call or special form). Nested arguments on the same line use `(...)`, `[...]`, or `{key val ...}`. Comments start with `;` and run to the end of the line.
 
-**Block structure uses tab indentation** (spaces do not count). Dedenting closes the block. Do not wrap a block in parentheses.
+**Block structure uses indentation**: one tab or four spaces per level. Dedenting closes the block. Do not wrap a block in parentheses.
 
 ```
 while (< i 10)
@@ -66,6 +66,8 @@ let [a 1 b 2]
 
 `setv` and `def` are aliases. `fn` is an anonymous function. `update` applies a function to the current value of a symbol and writes it back: `update x + 100` sets `x` to `(+ x 100)`.
 
+Tail calls to `defn` / `fn` reuse the current stack frame. A recursive call that is the whole result of `if`, `do`, `let`, `return`, or the last body form will not grow the Python stack. Nested calls such as `(+ "1" (additor (- x 1)))` are not tail calls.
+
 Parameter lists are `[required... &optional opt... &rest name? &keys name?]`:
 
 - `&optional name` or `&optional [name default]`
@@ -83,6 +85,7 @@ while test body...
 for [pat iterable] body...
 break
 continue
+return value?
 assert test msg?
 ```
 
@@ -93,7 +96,7 @@ for [[k v] (.items d)]
 	print k v
 ```
 
-`break` and `continue` only work inside `while` / `for`.
+`break` and `continue` only work inside `while` / `for`. `return` exits a `defn` / `fn` immediately; a bare `return` yields `None`. It is an error outside a function.
 
 ### Python interop
 

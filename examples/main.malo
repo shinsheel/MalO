@@ -95,6 +95,19 @@ let [n 3]
 		* x n
 	print (mul-n 4)
 
+defn abs [n]
+	if (< n 0)
+		return (- n)
+	return n
+print (abs -3)
+print (abs 3)
+
+defn additor [x]
+	if (= x 0)
+		return ""
+	(+ "1" (additor (- x 1)))
+print (additor 3)
+
 ; --- update ---
 update x + 100
 print x
