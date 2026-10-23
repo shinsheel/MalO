@@ -152,6 +152,20 @@ print {None "nil" 2 "two"}
 print {"outer" {"inner" 1}}
 print {(+ 1 2) "three"}
 
+print (get _dict "a")
+print _dict["a"]
+
+assoc _dict "c" "C"
+setv (get _dict "c") "C"
+setv _dict["c"] "C"
+print (get _dict "c")
+
+setv nested {"first_level" {"second_level" "value"}}
+assoc nested "first_level" "second_level" "value_new"
+setv (get nested "first_level" "second_level") "value_new"
+setv nested["first_level"]["second_level"] "value_new"
+print nested["first_level"]["second_level"]
+
 ; --- python interop ---
 import math
 import math :as mt os.path

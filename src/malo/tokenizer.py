@@ -144,8 +144,12 @@ def tokenize(text: str) -> Iterator[Token]:
             yield Token("rparen", ")", start_line, start_col)
             continue
         if c == "[":
+            # Glued to the previous form: obj[key]. A space, or a nested
+            # [[...]], stays a list: let [a 1], for [[k v] items].
+            prev = text[i - 1] if i else ""
             advance()
-            yield Token("lbracket", "[", start_line, start_col)
+            kind = "lbracket" if prev in " \t\r\n([{" or prev == "" else "lindex"
+            yield Token(kind, "[", start_line, start_col)
             continue
         if c == "]":
             advance()

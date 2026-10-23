@@ -1,5 +1,5 @@
 [project]
-name = "malo-scp"
+name = "run-malo"
 version = "0.1.0"
 description = "Hy-like Lisp interpreter"
 readme = "README.md"

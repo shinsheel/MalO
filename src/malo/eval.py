@@ -421,6 +421,45 @@ def _resolve_symbol(name: str, env: Dict[str, Any]) -> Any:
     raise MalOError(f"Unknown symbol: {name!r}")
 
 
+def _get_item(obj: Any, key: Any) -> Any:
+    try:
+        return obj[key]
+    except (KeyError, IndexError, TypeError) as exc:
+        raise MalOError(f"Cannot get {key!r}") from exc
+
+
+def _set_item(obj: Any, key: Any, value: Any) -> None:
+    try:
+        obj[key] = value
+    except (KeyError, IndexError, TypeError) as exc:
+        raise MalOError(f"Cannot set {key!r}") from exc
+
+
+def _walk_path(obj: Any, keys: List[Any]) -> Any:
+    """Follow every key and return the value at the end of the path."""
+    for key in keys:
+        obj = _get_item(obj, key)
+    return obj
+
+
+def _set_path(obj: Any, keys: List[Any], value: Any) -> Any:
+    """Set the last key, walking the earlier keys to the parent."""
+    if not keys:
+        raise MalOError("Index requires a key")
+    parent = _walk_path(obj, keys[:-1])
+    _set_item(parent, keys[-1], value)
+    return value
+
+
+def _is_get_form(form: MalOForm) -> bool:
+    return (
+        isinstance(form, ListForm)
+        and bool(form.elements)
+        and isinstance(form.elements[0], Symbol)
+        and form.elements[0].name == "get"
+    )
+
+
 def _bind_pattern(pat: MalOForm, value: Any, env: Dict[str, Any], context: str) -> None:
     """Bind a symbol or [pat ...] destructuring pattern to value in env."""
     if isinstance(pat, Symbol):
@@ -586,15 +625,44 @@ def eval_list(form: ListForm, env: Dict[str, Any], tail: bool = False) -> Any:
             env[place.name] = value
             return value
 
+        # (get coll key ...) => coll[key]... ; obj[key] parses as this
+        if name == "get":
+            if len(elements) < 3:
+                raise MalOError("(get coll key ...) requires a collection and a key")
+            obj = eval_form(elements[1], env)
+            keys = [eval_form(key, env) for key in elements[2:]]
+            return _walk_path(obj, keys)
+
+        # (assoc coll key ... value) mutates the collection and returns value
+        if name == "assoc":
+            if len(elements) < 4:
+                raise MalOError(
+                    "(assoc coll key ... value) requires a collection, a key, and a value"
+                )
+            obj = eval_form(elements[1], env)
+            keys = [eval_form(key, env) for key in elements[2:-1]]
+            value = eval_form(elements[-1], env)
+            return _set_path(obj, keys, value)
+
         if name == "def" or name == "setv":
             if len(elements) != 3:
                 raise MalOError("(def name value) requires exactly 3 elements")
-            sym = elements[1]
-            if not isinstance(sym, Symbol):
-                raise MalOError("(def name value): name must be a symbol")
-            value = eval_form(elements[2], env)
-            env[sym.name] = value
-            return value
+            place = _macroexpand(elements[1], env)
+            if isinstance(place, Symbol):
+                value = eval_form(elements[2], env)
+                env[place.name] = value
+                return value
+            # (setv (get coll key ...) value) and (setv coll[key] value)
+            if _is_get_form(place):
+                if len(place.elements) < 3:
+                    raise MalOError("(setv (get coll key ...) value) requires a key")
+                obj = eval_form(place.elements[1], env)
+                keys = [eval_form(key, env) for key in place.elements[2:]]
+                value = eval_form(elements[2], env)
+                return _set_path(obj, keys, value)
+            raise MalOError(
+                "(setv place value): place must be a symbol or (get coll key ...)"
+            )
 
         if name == "while":
             if len(elements) < 2:
