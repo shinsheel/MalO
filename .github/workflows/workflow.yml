@@ -29,7 +29,7 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: pypi
-      url: https://pypi.org/p/malo-scp
+      url: https://pypi.org/p/run-malo
     permissions:
       id-token: write
     steps:
